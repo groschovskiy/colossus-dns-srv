@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/go-sql-driver/mysql"
 	_ "github.com/go-sql-driver/mysql"
@@ -47,9 +48,15 @@ func main() {
 	}
 	defer db.Close()
 
-	if err := loadRecords(db); err != nil {
-		log.Fatalf("Failed to load records: %v", err)
-	}
+	go func() {
+		for {
+			clearRecords()
+			if err := loadRecords(db); err != nil {
+				log.Printf("Failed to load records: %v", err)
+			}
+			time.Sleep(3 * time.Second)
+		}
+	}()
 
 	server := &dns.Server{Addr: ":53", Net: "udp"}
 	dns.HandleFunc(".", handleDNSRequest)
@@ -59,6 +66,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
+}
+
+func clearRecords() {
+	recordLock.Lock()
+	defer recordLock.Unlock()
+	records = make(map[string][]DNSRecord)
+	log.Println("Cleared existing DNS records from memory")
 }
 
 func loadRecords(db *sql.DB) error {
