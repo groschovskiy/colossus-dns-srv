@@ -1,15 +1,18 @@
 package main
 
 import (
+	"crypto/tls"
 	"database/sql"
 	"fmt"
 	"log"
 	"net"
 	"os"
+	"strings"
 	"sync"
 
-	"github.com/miekg/dns"
+	"github.com/go-sql-driver/mysql"
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/miekg/dns"
 )
 
 type DNSRecord struct {
@@ -17,7 +20,7 @@ type DNSRecord struct {
 	Type     uint16
 	Content  string
 	TTL      uint32
-	Priority uint16 // For MX and SRV records
+	Priority uint16
 }
 
 var (
@@ -28,7 +31,12 @@ var (
 func main() {
 	records = make(map[string][]DNSRecord)
 
-	db, err := sql.Open("mysql", fmt.Sprintf("%s:%s@tcp(%s:%s)/%s",
+	mysql.RegisterTLSConfig("tidb", &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		ServerName: "gateway01.eu-central-1.prod.aws.tidbcloud.com",
+	})
+
+	db, err := sql.Open("mysql", fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?tls=tidb",
 		os.Getenv("TIDB_USER"),
 		os.Getenv("TIDB_PASSWORD"),
 		os.Getenv("TIDB_HOST"),
@@ -71,6 +79,7 @@ func loadRecords(db *sql.DB) error {
 			return err
 		}
 		r.Type = dns.StringToType[recordType]
+		r.Name = dns.Fqdn(r.Name)
 		records[r.Name] = append(records[r.Name], r)
 	}
 
@@ -86,20 +95,91 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 	log.Printf("Received DNS request from %s", clientIP)
 
 	for _, question := range r.Question {
-		log.Printf("Query for %s", question.Name)
+		name := question.Name
+		qtype := question.Qtype
+		log.Printf("Query for %s (type %s)", name, dns.TypeToString[qtype])
+
 		recordLock.RLock()
-		if recs, ok := records[question.Name]; ok {
+		if recs, ok := records[name]; ok {
 			for _, rec := range recs {
-				if rec.Type == question.Qtype {
-					rr, err := dns.NewRR(fmt.Sprintf("%s %d IN %s %s", rec.Name, rec.TTL, dns.TypeToString[rec.Type], rec.Content))
-					if err == nil {
+				if rec.Type == qtype || qtype == dns.TypeANY {
+					rr := createRR(rec)
+					if rr != nil {
 						m.Answer = append(m.Answer, rr)
 					}
 				}
 			}
 		}
 		recordLock.RUnlock()
+
+		if len(m.Answer) == 0 {
+			labels := dns.SplitDomainName(name)
+			for i := 0; i < len(labels); i++ {
+				wildcard := "*." + strings.Join(labels[i:], ".") + "."
+				if recs, ok := records[wildcard]; ok {
+					for _, rec := range recs {
+						if rec.Type == qtype || qtype == dns.TypeANY {
+							rr := createRR(rec)
+							if rr != nil {
+								rr.Header().Name = name
+								m.Answer = append(m.Answer, rr)
+							}
+						}
+					}
+					break
+				}
+			}
+		}
 	}
 
 	w.WriteMsg(m)
+}
+
+func createRR(rec DNSRecord) dns.RR {
+	switch rec.Type {
+	case dns.TypeA:
+		return &dns.A{
+			Hdr: dns.RR_Header{Name: rec.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: rec.TTL},
+			A:   net.ParseIP(rec.Content),
+		}
+	case dns.TypeAAAA:
+		return &dns.AAAA{
+			Hdr:  dns.RR_Header{Name: rec.Name, Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: rec.TTL},
+			AAAA: net.ParseIP(rec.Content),
+		}
+	case dns.TypeMX:
+		parts := strings.Fields(rec.Content)
+		if len(parts) != 2 {
+			log.Printf("Invalid MX record format: %s", rec.Content)
+			return nil
+		}
+		return &dns.MX{
+			Hdr:        dns.RR_Header{Name: rec.Name, Rrtype: dns.TypeMX, Class: dns.ClassINET, Ttl: rec.TTL},
+			Preference: rec.Priority,
+			Mx:         parts[1],
+		}
+	case dns.TypeSRV:
+		parts := strings.Fields(rec.Content)
+		if len(parts) != 3 {
+			log.Printf("Invalid SRV record format: %s", rec.Content)
+			return nil
+		}
+		weight, _ := fmt.Sscanf(parts[0], "%d", new(uint16))
+		port, _ := fmt.Sscanf(parts[1], "%d", new(uint16))
+		return &dns.SRV{
+			Hdr:      dns.RR_Header{Name: rec.Name, Rrtype: dns.TypeSRV, Class: dns.ClassINET, Ttl: rec.TTL},
+			Priority: rec.Priority,
+			Weight:   uint16(weight),
+			Port:     uint16(port),
+			Target:   parts[2],
+		}
+	case dns.TypeTXT:
+		return &dns.TXT{
+			Hdr: dns.RR_Header{Name: rec.Name, Rrtype: dns.TypeTXT, Class: dns.ClassINET, Ttl: rec.TTL},
+			Txt: []string{rec.Content},
+		}
+	default:
+		log.Printf("Unsupported record type: %d", rec.Type)
+		return nil
+	}
 }
