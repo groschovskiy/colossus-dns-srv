@@ -4,8 +4,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/groschovskiy/colossus-dns-srv/internal/ctl"
-	"github.com/groschovskiy/colossus-dns-srv/internal/handlers"
+	"colossus-dns/internal/ctl"
+	"colossus-dns/internal/handlers"
 
 	"github.com/miekg/dns"
 )
