@@ -6,9 +6,7 @@ on:
   pull_request:
     branches: [ "main" ]
 
-permissions:
-  actions: read
-  id-token: read
+permissions: read-all
 
 jobs:
   build:
