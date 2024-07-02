@@ -15,7 +15,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Build the Docker image
-      run: docker build . --file scripts/Dockerfile --tag lerigos:${{ github.sha }}
+      run: docker build --tag lerigos:${{ github.sha }} .
 
     - name: Auth in DockerHub
       uses: docker/login-action@v3.0.0
