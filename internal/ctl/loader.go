@@ -13,7 +13,7 @@ import (
 func InitDatabase() (*sql.DB, error) {
 	mysql.RegisterTLSConfig("tidb", &tls.Config{
 		MinVersion: tls.VersionTLS12,
-		ServerName: "gateway01.eu-central-1.prod.aws.tidbcloud.com",
+		ServerName: os.Getenv("TIDB_HOST"),
 	})
 
 	db, err := sql.Open("mysql", fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?tls=tidb",

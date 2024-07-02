@@ -1,4 +1,4 @@
-module colossus-dns
+module github.com/groschovskiy/colossus-dns-srv
 
 go 1.21.10
 

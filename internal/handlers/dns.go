@@ -5,7 +5,7 @@ import (
 	"net"
 	"strings"
 
-	"colossus-dns/internal/ctl"
+	"github.com/groschovskiy/colossus-dns-srv/internal/ctl"
 
 	"github.com/miekg/dns"
 )
