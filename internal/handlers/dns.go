@@ -33,7 +33,7 @@ func handleQuestion(m *dns.Msg, name string, qtype uint16) {
 	records := ctl.GetRecords()
 
 	if recs, ok := records[name]; ok {
-		appendMatchingRecords(m, recs, qtype)
+		handleRecords(m, recs, name, qtype, records, 0)
 	}
 
 	if len(m.Answer) == 0 {
@@ -41,10 +41,26 @@ func handleQuestion(m *dns.Msg, name string, qtype uint16) {
 	}
 }
 
-func appendMatchingRecords(m *dns.Msg, recs []ctl.DNSRecord, qtype uint16) {
+func handleRecords(m *dns.Msg, recs []ctl.DNSRecord, name string, qtype uint16, allRecords map[string][]ctl.DNSRecord, depth int) {
+	if depth > 10 {
+		log.Printf("CNAME resolution depth exceeded for %s", name)
+		return
+	}
+
 	for _, rec := range recs {
-		if rec.Type == qtype || qtype == dns.TypeANY {
-			if rr := ctl.CreateRR(rec); rr != nil {
+		if rec.Type == dns.TypeCNAME {
+			rr := ctl.CreateRR(rec)
+			m.Answer = append(m.Answer, rr)
+
+			if qtype != dns.TypeCNAME {
+				cname := rec.Content
+				if cnameRecs, ok := allRecords[cname]; ok {
+					handleRecords(m, cnameRecs, cname, qtype, allRecords, depth+1)
+				}
+			}
+		} else if rec.Type == qtype || qtype == dns.TypeANY {
+			rr := ctl.CreateRR(rec)
+			if rr != nil {
 				m.Answer = append(m.Answer, rr)
 			}
 		}
@@ -56,14 +72,7 @@ func handleWildcardQuery(m *dns.Msg, name string, qtype uint16, records map[stri
 	for i := 0; i < len(labels); i++ {
 		wildcard := "*." + strings.Join(labels[i:], ".") + "."
 		if recs, ok := records[wildcard]; ok {
-			for _, rec := range recs {
-				if rec.Type == qtype || qtype == dns.TypeANY {
-					if rr := ctl.CreateRR(rec); rr != nil {
-						rr.Header().Name = name
-						m.Answer = append(m.Answer, rr)
-					}
-				}
-			}
+			handleRecords(m, recs, name, qtype, records, 0)
 			break
 		}
 	}

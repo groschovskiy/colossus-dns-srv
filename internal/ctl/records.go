@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -45,10 +46,17 @@ func CreateRR(rec DNSRecord) dns.RR {
 			Hdr:  dns.RR_Header{Name: rec.Name, Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: rec.TTL},
 			AAAA: net.ParseIP(rec.Content),
 		}
+	case dns.TypeCNAME:
+		return &dns.CNAME{
+			Hdr:    dns.RR_Header{Name: rec.Name, Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: rec.TTL},
+			Target: rec.Content,
+		}
 	case dns.TypeMX:
 		return createMXRecord(rec)
 	case dns.TypeSRV:
 		return createSRVRecord(rec)
+	case dns.TypeSOA:
+		return createSOARecord(rec)
 	case dns.TypeTXT:
 		return &dns.TXT{
 			Hdr: dns.RR_Header{Name: rec.Name, Rrtype: dns.TypeTXT, Class: dns.ClassINET, Ttl: rec.TTL},
@@ -88,5 +96,29 @@ func createSRVRecord(rec DNSRecord) *dns.SRV {
 		Weight:   weight,
 		Port:     port,
 		Target:   parts[2],
+	}
+}
+
+func createSOARecord(rec DNSRecord) *dns.SOA {
+	parts := strings.Fields(rec.Content)
+	if len(parts) != 7 {
+		log.Printf("Invalid SOA record format: %s", rec.Content)
+		return nil
+	}
+	serial, _ := strconv.ParseUint(parts[2], 10, 32)
+	refresh, _ := strconv.ParseInt(parts[3], 10, 32)
+	retry, _ := strconv.ParseInt(parts[4], 10, 32)
+	expire, _ := strconv.ParseInt(parts[5], 10, 32)
+	minttl, _ := strconv.ParseUint(parts[6], 10, 32)
+
+	return &dns.SOA{
+		Hdr:     dns.RR_Header{Name: rec.Name, Rrtype: dns.TypeSOA, Class: dns.ClassINET, Ttl: rec.TTL},
+		Ns:      parts[0],
+		Mbox:    parts[1],
+		Serial:  uint32(serial),
+		Refresh: uint32(refresh),
+		Retry:   uint32(retry),
+		Expire:  uint32(expire),
+		Minttl:  uint32(minttl),
 	}
 }

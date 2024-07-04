@@ -50,6 +50,9 @@ func LoadRecords(db *sql.DB) error {
 		}
 		r.Type = dns.StringToType[recordType]
 		r.Name = dns.Fqdn(r.Name)
+		if r.Type == dns.TypeCNAME {
+			r.Content = dns.Fqdn(r.Content)
+		}
 		newRecords[r.Name] = append(newRecords[r.Name], r)
 	}
 
