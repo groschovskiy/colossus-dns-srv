@@ -12,11 +12,12 @@ import (
 )
 
 type DNSRecord struct {
-	Name     string
-	Type     uint16
-	Content  string
-	TTL      uint32
-	Priority uint16
+	Name         string
+	Type         uint16
+	Content      string
+	TTL          uint32
+	Priority     uint16
+	GeoContinent string
 }
 
 var (
@@ -70,14 +71,32 @@ func CreateRR(rec DNSRecord) dns.RR {
 
 func createMXRecord(rec DNSRecord) *dns.MX {
 	parts := strings.Fields(rec.Content)
-	if len(parts) != 2 {
-		log.Printf("Invalid MX record format: %s", rec.Content)
-		return nil
+	var preference uint16
+	var mx string
+
+	if len(parts) == 2 {
+		pref, err := strconv.ParseUint(parts[0], 10, 16)
+		if err == nil {
+			preference = uint16(pref)
+			mx = parts[1]
+		} else {
+			log.Printf("Invalid MX preference: %s, using default", parts[0])
+			preference = rec.Priority
+			mx = rec.Content
+		}
+	} else if len(parts) == 1 {
+		preference = rec.Priority
+		mx = parts[0]
+	} else {
+		log.Printf("Invalid MX record format: %s, using default", rec.Content)
+		preference = rec.Priority
+		mx = rec.Content
 	}
+
 	return &dns.MX{
 		Hdr:        dns.RR_Header{Name: rec.Name, Rrtype: dns.TypeMX, Class: dns.ClassINET, Ttl: rec.TTL},
-		Preference: rec.Priority,
-		Mx:         parts[1],
+		Preference: preference,
+		Mx:         dns.Fqdn(mx),
 	}
 }
 

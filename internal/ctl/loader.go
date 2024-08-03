@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/miekg/dns"
@@ -30,7 +32,7 @@ func InitDatabase() (*sql.DB, error) {
 }
 
 func LoadRecords(db *sql.DB) error {
-	rows, err := db.Query("SELECT name, type, content, ttl, priority FROM dns_records")
+	rows, err := db.Query("SELECT name, type, content, ttl, priority, geo_continent FROM dns_records")
 	if err != nil {
 		return err
 	}
@@ -44,15 +46,36 @@ func LoadRecords(db *sql.DB) error {
 	for rows.Next() {
 		var r DNSRecord
 		var recordType string
-		err := rows.Scan(&r.Name, &recordType, &r.Content, &r.TTL, &r.Priority)
+		err := rows.Scan(&r.Name, &recordType, &r.Content, &r.TTL, &r.Priority, &r.GeoContinent)
 		if err != nil {
 			return err
 		}
 		r.Type = dns.StringToType[recordType]
 		r.Name = dns.Fqdn(r.Name)
-		if r.Type == dns.TypeCNAME {
+
+		switch r.Type {
+		case dns.TypeCNAME:
 			r.Content = dns.Fqdn(r.Content)
+		case dns.TypeMX:
+			parts := strings.Fields(r.Content)
+			if len(parts) == 2 {
+				preference, err := strconv.ParseUint(parts[0], 10, 16)
+				if err == nil {
+					r.Priority = uint16(preference)
+					r.Content = dns.Fqdn(parts[1])
+				} else {
+					r.Content = fmt.Sprintf("%d %s", r.Priority, dns.Fqdn(r.Content))
+				}
+			} else if len(parts) == 1 {
+				r.Content = fmt.Sprintf("%d %s", r.Priority, dns.Fqdn(r.Content))
+			}
+		case dns.TypeSRV:
+			parts := strings.Fields(r.Content)
+			if len(parts) == 3 {
+				r.Content = fmt.Sprintf("%s %s %s", parts[0], parts[1], dns.Fqdn(parts[2]))
+			}
 		}
+
 		newRecords[r.Name] = append(newRecords[r.Name], r)
 	}
 
